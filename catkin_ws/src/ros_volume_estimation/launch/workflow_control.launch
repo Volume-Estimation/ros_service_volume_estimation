@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Launch the workflow control node -->
+  <node name="workflow_control_node" pkg="ros_volume_estimation" type="workflow_control_node" output="screen">
+    <rosparam file="$(find ros_volume_estimation)/config/workflow_control.yaml" command="load" if="$(eval arg('config_file') != '')"/>
+  </node>
+  
+  <!-- Optional: Launch parameter server for node configurations -->
+  <!-- Euclidean clustering config removed -->
+  <rosparam file="$(find ros_volume_estimation)/config/transform.yaml" command="load" ns="transform_node"/>
+  <rosparam file="$(find ros_volume_estimation)/config/crop_filter.yaml" command="load" ns="crop_filter_node"/>
+  <rosparam file="$(find ros_volume_estimation)/config/volume_estimator.yaml" command="load" ns="volume_estimator_node"/>
+  
+  <!-- Arguments -->
+  <arg name="config_file" default=""/>
+  
+  <!-- Service interface information -->
+  <node name="service_info" pkg="ros_volume_estimation" type="workflow_control_node" output="screen" launch-prefix="echo 'Service Control Available:
+  - Start Processing: rosservice call /volume_estimation/toggle_processing \"enabled: true\"
+  - Stop Processing: rosservice call /volume_estimation/toggle_processing \"enabled: false\"
+  - Check Status: rostopic echo /volume_estimation/status -n 1'" if="false"/>
+</launch>

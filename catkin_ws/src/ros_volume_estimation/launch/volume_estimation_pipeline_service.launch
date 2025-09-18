@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Volume Estimation Pipeline with Service Control -->
+  
+  <!-- Launch the workflow control node -->
+  <node name="workflow_control_node" pkg="ros_volume_estimation" type="workflow_control_node" output="screen"/>
+  
+  <!-- Set parameters for all nodes (they will be used when nodes are started via service) -->
+  <!-- Euclidean Clustering params removed; clustering node no longer used -->
+  
+  <rosparam param="transform_node/transformation_matrix">[
+    0.951720, -0.243870, -0.186428, 68.860422,
+    0.250047, 0.968182, 0.009997, 19.368149,
+    0.178058, -0.056130, 0.982418, 17.594308,
+    0.000000, 0.000000, 0.000000, 1.000000
+  ]</rosparam>
+  <param name="transform_node/use_inverse" value="false"/>
+  <param name="transform_node/show_info" value="true"/>
+  
+  <param name="crop_filter_node/polygons" value="1,1: 0.032,6,0.049, 61.995,6,0.049, 61.995,43.140,0.049, 0.032,43.140,0.049, 0.032,6,15, 61.995,6,15, 61.995,43.140,15, 0.032,43.140,15"/>
+  
+  <param name="volume_estimator_node/grid_resolution_x" value="0.1"/>
+  <param name="volume_estimator_node/grid_resolution_y" value="0.1"/>
+  <param name="volume_estimator_node/height_method" value="mean"/>
+  <param name="volume_estimator_node/interpolate_empty_cells" value="true"/>
+  <param name="volume_estimator_node/max_interpolation_passes" value="1000"/>
+  
+  <!-- Service usage information -->
+  <!-- 
+  Service Control Available:
+  Start Processing: rosservice call /volume_estimation/toggle_processing "enabled: true"
+  Stop Processing: rosservice call /volume_estimation/toggle_processing "enabled: false"
+  Check Status: rostopic echo /volume_estimation/status -n 1
+  -->
+</launch>

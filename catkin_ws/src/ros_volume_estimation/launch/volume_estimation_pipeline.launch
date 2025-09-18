@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Volume Estimation Pipeline Launch File -->
+  
+  <!-- Euclidean Clustering Node removed; transform_node now subscribes to /pointcloud_raw -->
+
+  <!-- Transform Node -->
+  <node name="transform_node" pkg="ros_volume_estimation" type="transform_node" output="screen">
+    <!-- 4x4 transformation matrix from original workflow -->
+    <rosparam param="transformation_matrix">[
+      0.951720, -0.243870, -0.186428, 68.860422,
+      0.250047, 0.968182, 0.009997, 19.368149,
+      0.178058, -0.056130, 0.982418, 17.594308,
+      0.000000, 0.000000, 0.000000, 1.000000
+    ]</rosparam>
+    <param name="use_inverse" value="false" />
+    <param name="show_info" value="true" />
+  </node>
+
+  <!-- Crop Filter Node -->
+  <node name="crop_filter_node" pkg="ros_volume_estimation" type="crop_filter_node" output="screen">
+    <!-- Polygon parameters from original workflow -->
+    <param name="polygons" value="1,1: 0.032,6,0.049, 61.995,6,0.049, 61.995,43.140,0.049, 0.032,43.140,0.049, 0.032,6,15, 61.995,6,15, 61.995,43.140,15, 0.032,43.140,15" />
+  </node>
+
+  <!-- Volume Estimator Node -->
+  <node name="volume_estimator_node" pkg="ros_volume_estimation" type="volume_estimator_node" output="screen">
+    <param name="grid_resolution_x" value="0.1" />
+    <param name="grid_resolution_y" value="0.1" />
+    <param name="height_method" value="mean" />
+    <param name="interpolate_empty_cells" value="true" />
+    <param name="max_interpolation_passes" value="1000" />
+  </node>
+
+  <!-- Optional: RViz for visualization -->
+  <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find ros_volume_estimation)/rviz/volume_estimation.rviz" /> -->
+
+</launch>
