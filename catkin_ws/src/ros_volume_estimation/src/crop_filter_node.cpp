@@ -9,6 +9,8 @@
 #include <string>
 #include <sstream>
 #include <algorithm>
+#include <fstream>
+#include <ros/package.h>
 
 typedef pcl::PointXYZ PointT;
 
@@ -28,16 +30,29 @@ private:
     
 public:
     CropFilterNode() : nh_("~") {
-        // Get polygon parameters
-        std::string polygons_str;
-        if (!nh_.getParam("polygons", polygons_str)) {
-            ROS_ERROR("polygons parameter is required");
-            ros::shutdown();
-            return;
-        }
+        // Get file path parameter
+        std::string corners_file;
+        nh_.param<std::string>("corners_file", corners_file, "");
         
-        // Parse scene areas
-        setSceneAreas(polygons_str);
+        if (corners_file.empty()) {
+            // Fallback to old parameter-based method
+            std::string polygons_str;
+            if (!nh_.getParam("polygons", polygons_str)) {
+                ROS_ERROR("polygons parameter is required");
+                ros::shutdown();
+                return;
+            }
+            
+            // Parse scene areas
+            setSceneAreas(polygons_str);
+        } else {
+            // Load corners from file
+            if (!loadCornersFromFile(corners_file)) {
+                ROS_ERROR("Failed to load corners from file: %s", corners_file.c_str());
+                ros::shutdown();
+                return;
+            }
+        }
         
         // Subscribe and advertise
         sub_ = nh_.subscribe("/pointcloud_transformed", 1, &CropFilterNode::pointCloudCallback, this);
@@ -71,6 +86,52 @@ public:
     }
     
 private:
+    bool loadCornersFromFile(const std::string& filepath) {
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            ROS_ERROR("Cannot open corners file: %s", filepath.c_str());
+            return false;
+        }
+        
+        ROS_INFO("Loading corners from: %s", filepath.c_str());
+        
+        scene_areas_.clear();
+        SceneArea area;
+        area.group1_id = 1;
+        area.group2_id = 1;
+        
+        std::string line;
+        int line_count = 0;
+        
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            double x, y, z;
+            
+            if (iss >> x >> y >> z) {
+                PointT pt;
+                pt.x = x;
+                pt.y = y;
+                pt.z = z;
+                area.vertexs.push_back(pt);
+                line_count++;
+                
+                ROS_INFO("Loaded corner %d: (%.6f, %.6f, %.6f)", line_count, x, y, z);
+            }
+        }
+        
+        file.close();
+        
+        if (area.vertexs.size() < 4) {
+            ROS_ERROR("Need at least 4 corners, got %zu", area.vertexs.size());
+            return false;
+        }
+        
+        scene_areas_.push_back(area);
+        ROS_INFO("Successfully loaded %zu corners from file", area.vertexs.size());
+        
+        return true;
+    }
+    
     std::string& ltrim(std::string &ss) {
         std::string::iterator p = std::find_if(ss.begin(), ss.end(), 
             [](unsigned char c) { return !std::isspace(c); });

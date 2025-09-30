@@ -8,16 +8,13 @@
   <!-- Set parameters for all nodes (they will be used when nodes are started via service) -->
   <!-- Euclidean Clustering params removed; clustering node no longer used -->
   
-  <rosparam param="transform_node/transformation_matrix">[
-    0.951720, -0.243870, -0.186428, 68.860422,
-    0.250047, 0.968182, 0.009997, 19.368149,
-    0.178058, -0.056130, 0.982418, 17.594308,
-    0.000000, 0.000000, 0.000000, 1.000000
-  ]</rosparam>
+  <!-- Transform node parameters: read transformation matrix from file -->
+  <param name="transform_node/matrix_file" value="$(find ros_volume_estimation)/../../../T_level.txt"/>
   <param name="transform_node/use_inverse" value="false"/>
   <param name="transform_node/show_info" value="true"/>
   
-  <param name="crop_filter_node/polygons" value="1,1: 0.032,6,0.049, 61.995,6,0.049, 61.995,43.140,0.049, 0.032,43.140,0.049, 0.032,6,15, 61.995,6,15, 61.995,43.140,15, 0.032,43.140,15"/>
+  <!-- Crop filter node parameters: read corners from file -->
+  <param name="crop_filter_node/corners_file" value="$(find ros_volume_estimation)/../../../obb_corners.txt"/>
   
   <param name="volume_estimator_node/grid_resolution_x" value="0.1"/>
   <param name="volume_estimator_node/grid_resolution_y" value="0.1"/>

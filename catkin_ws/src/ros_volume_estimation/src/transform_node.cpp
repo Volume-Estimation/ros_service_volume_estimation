@@ -8,6 +8,9 @@
 #include <vector>
 #include <string>
 #include <iomanip>
+#include <fstream>
+#include <sstream>
+#include <ros/package.h>
 
 class TransformNode {
 private:
@@ -22,18 +25,31 @@ private:
     
 public:
     TransformNode() : nh_("~") {
-        // Get transformation matrix from parameters
-        std::vector<double> matrix_params;
-        if (!nh_.getParam("transformation_matrix", matrix_params) || matrix_params.size() != 16) {
-            ROS_ERROR("transformation_matrix parameter must contain exactly 16 elements");
-            ros::shutdown();
-            return;
-        }
+        // Get file path parameter
+        std::string matrix_file;
+        nh_.param<std::string>("matrix_file", matrix_file, "");
         
-        // Convert to Eigen matrix
-        for (int i = 0; i < 4; i++) {
-            for (int j = 0; j < 4; j++) {
-                transformation_matrix_(i, j) = matrix_params[i * 4 + j];
+        if (matrix_file.empty()) {
+            // Fallback to old parameter-based method
+            std::vector<double> matrix_params;
+            if (!nh_.getParam("transformation_matrix", matrix_params) || matrix_params.size() != 16) {
+                ROS_ERROR("transformation_matrix parameter must contain exactly 16 elements");
+                ros::shutdown();
+                return;
+            }
+            
+            // Convert to Eigen matrix
+            for (int i = 0; i < 4; i++) {
+                for (int j = 0; j < 4; j++) {
+                    transformation_matrix_(i, j) = matrix_params[i * 4 + j];
+                }
+            }
+        } else {
+            // Read matrix from file
+            if (!loadMatrixFromFile(matrix_file)) {
+                ROS_ERROR("Failed to load transformation matrix from file: %s", matrix_file.c_str());
+                ros::shutdown();
+                return;
             }
         }
         
@@ -77,6 +93,44 @@ public:
     }
     
 private:
+    bool loadMatrixFromFile(const std::string& filepath) {
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            ROS_ERROR("Cannot open transformation matrix file: %s", filepath.c_str());
+            return false;
+        }
+        
+        ROS_INFO("Loading transformation matrix from: %s", filepath.c_str());
+        
+        std::vector<double> values;
+        std::string line;
+        
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            double value;
+            while (iss >> value) {
+                values.push_back(value);
+            }
+        }
+        
+        file.close();
+        
+        if (values.size() != 16) {
+            ROS_ERROR("Expected 16 values in matrix file, got %zu", values.size());
+            return false;
+        }
+        
+        // Fill matrix (row-major order)
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                transformation_matrix_(i, j) = values[i * 4 + j];
+            }
+        }
+        
+        ROS_INFO("Successfully loaded transformation matrix from file");
+        return true;
+    }
+    
     void printTransformationInfo() {
         ROS_INFO("=== Transformation Information ===");
         

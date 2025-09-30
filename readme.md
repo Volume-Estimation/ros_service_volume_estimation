@@ -8,7 +8,7 @@ roslaunch ros_volume_estimation volume_estimation_pipeline_service.launch
 # 发布点云
 新终端
 rosrun pcl_ros pcd_to_pointcloud \
-./at128_seg.pcd \
+./test_1.pcd \
 0.1 _frame_id:=/base_link cloud_pcd:=/pointcloud_raw
 
 # 启动工作流
