@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/steven/projects/ros_service_volume_estimation/catkin_ws/install/setup.sh

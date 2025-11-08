@@ -9,7 +9,7 @@
   <!-- Euclidean Clustering params removed; clustering node no longer used -->
   
   <!-- Transform node parameters: read transformation matrix from file -->
-  <param name="transform_node/matrix_file" value="$(find ros_volume_estimation)/../../../T_level.txt"/>
+  <param name="transform_node/matrix_file" value="$(find ros_volume_estimation)/../../../T_level_yaw.txt"/>
   <param name="transform_node/use_inverse" value="false"/>
   <param name="transform_node/show_info" value="true"/>
   
@@ -19,7 +19,7 @@
   <param name="volume_estimator_node/grid_resolution_x" value="0.1"/>
   <param name="volume_estimator_node/grid_resolution_y" value="0.1"/>
   <param name="volume_estimator_node/height_method" value="mean"/>
-  <param name="volume_estimator_node/interpolate_empty_cells" value="true"/>
+  <param name="volume_estimator_node/interpolate_empty_cells" value="false"/>
   <param name="volume_estimator_node/max_interpolation_passes" value="1000"/>
   
   <!-- Service usage information -->

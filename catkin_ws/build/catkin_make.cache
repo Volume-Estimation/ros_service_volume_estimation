@@ -1,0 +1,2 @@
+ros_volume_estimation
+-DCATKIN_DEVEL_PREFIX=/home/steven/projects/ros_service_volume_estimation/catkin_ws/devel -DCMAKE_INSTALL_PREFIX=/home/steven/projects/ros_service_volume_estimation/catkin_ws/install -G Unix Makefiles

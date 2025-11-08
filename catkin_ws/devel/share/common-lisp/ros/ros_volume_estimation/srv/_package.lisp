@@ -1,0 +1,10 @@
+(cl:defpackage ros_volume_estimation-srv
+  (:use )
+  (:export
+   "TOGGLEPROCESSING"
+   "<TOGGLEPROCESSING-REQUEST>"
+   "TOGGLEPROCESSING-REQUEST"
+   "<TOGGLEPROCESSING-RESPONSE>"
+   "TOGGLEPROCESSING-RESPONSE"
+  ))
+

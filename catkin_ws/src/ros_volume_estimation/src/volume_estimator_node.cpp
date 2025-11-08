@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <fstream>
+#include <sstream>
 
 class VolumeEstimatorNode {
 private:
@@ -41,6 +43,11 @@ private:
                              initial_empty_cells(0), final_empty_cells(0), filled_cells(0), convex_hull_area(0) {}
     };
     
+    // OBB-based base plane (from corners file)
+    bool have_obb_base_normal_ = false;
+    Eigen::Vector3d obb_base_normal_ = Eigen::Vector3d(0.0, 0.0, 1.0);
+    std::string obb_corners_file_;
+    
 public:
     VolumeEstimatorNode() : nh_("~") {
         // Get parameters
@@ -49,6 +56,17 @@ public:
         nh_.param("height_method", height_method_, std::string("mean"));
         nh_.param("interpolate_empty_cells", interpolate_empty_cells_, true);
         nh_.param("max_interpolation_passes", max_interpolation_passes_, 1000);
+        
+        // Try to get corners file path (prefer local param; fallback to global crop_filter_node param)
+        nh_.param<std::string>("corners_file", obb_corners_file_, std::string(""));
+        if (obb_corners_file_.empty()) {
+            if (!ros::param::get("crop_filter_node/corners_file", obb_corners_file_)) {
+                ROS_WARN("No corners_file provided for volume_estimator_node, falling back to PCA plane normal.");
+            }
+        }
+        if (!obb_corners_file_.empty()) {
+            have_obb_base_normal_ = loadObbCornersAndComputeBaseNormal(obb_corners_file_);
+        }
         
         // Subscribe and advertise
         sub_ = nh_.subscribe("/pointcloud_cropped", 1, &VolumeEstimatorNode::pointCloudCallback, this);
@@ -102,6 +120,118 @@ public:
     }
     
 private:
+    // -------- Helpers to match pcd_tool.py DEM semantics --------
+    Eigen::Vector3d computePlaneNormalPCA(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud) {
+        // Compute mean
+        Eigen::Vector3d mean(0.0, 0.0, 0.0);
+        for (const auto& p : cloud->points) {
+            mean.x() += p.x; mean.y() += p.y; mean.z() += p.z;
+        }
+        if (cloud->points.empty()) return Eigen::Vector3d(0.0, 0.0, 1.0);
+        mean /= static_cast<double>(cloud->points.size());
+
+        // Compute covariance
+        Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+        for (const auto& p : cloud->points) {
+            Eigen::Vector3d v(p.x - mean.x(), p.y - mean.y(), p.z - mean.z());
+            cov += v * v.transpose();
+        }
+        if (cloud->points.size() > 1) {
+            cov /= static_cast<double>(cloud->points.size() - 1);
+        }
+
+        // Eigen decomposition (ascending eigenvalues)
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(cov);
+        if (solver.info() != Eigen::Success) {
+            return Eigen::Vector3d(0.0, 0.0, 1.0);
+        }
+        Eigen::Vector3d n = solver.eigenvectors().col(0); // smallest eigenvalue => plane normal
+        if (n.norm() < 1e-12) return Eigen::Vector3d(0.0, 0.0, 1.0);
+        // Ensure pointing upwards (optional)
+        if (n.z() < 0) n = -n;
+        return n.normalized();
+    }
+
+    Eigen::Matrix3d rotationAlignAToB(const Eigen::Vector3d& a, const Eigen::Vector3d& b) {
+        Eigen::Vector3d an = a.normalized();
+        Eigen::Vector3d bn = b.normalized();
+        Eigen::Vector3d v = an.cross(bn);
+        double s = v.norm();
+        double c = an.dot(bn);
+        if (s < 1e-12) {
+            if (c > 0.0) {
+                return Eigen::Matrix3d::Identity();
+            } else {
+                // 180 deg rotation around any axis orthogonal to an
+                Eigen::Vector3d axis = an.unitOrthogonal();
+                Eigen::Matrix3d K;
+                K <<     0, -axis.z(),  axis.y(),
+                      axis.z(),       0, -axis.x(),
+                     -axis.y(),  axis.x(),       0;
+                return Eigen::Matrix3d::Identity() + K + K * K;
+            }
+        }
+        Eigen::Matrix3d K;
+        K <<     0, -v.z(),  v.y(),
+              v.z(),     0, -v.x(),
+             -v.y(),  v.x(),     0;
+        return Eigen::Matrix3d::Identity() + K + K * K * ((1.0 - c) / (s * s));
+    }
+
+    bool loadObbCornersAndComputeBaseNormal(const std::string& filepath) {
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            ROS_WARN("Cannot open OBB corners file: %s", filepath.c_str());
+            return false;
+        }
+        std::vector<Eigen::Vector3d> corners;
+        std::string line;
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            double x, y, z;
+            if (iss >> x >> y >> z) {
+                corners.emplace_back(x, y, z);
+            }
+        }
+        file.close();
+        if (corners.size() < 4) {
+            ROS_WARN("OBB corners file contains fewer than 4 points (got %zu)", corners.size());
+            return false;
+        }
+        // Take 4 lowest-z points as bottom face and fit plane normal
+        std::sort(corners.begin(), corners.end(), [](const Eigen::Vector3d& a, const Eigen::Vector3d& b){
+            return a.z() < b.z();
+        });
+        size_t take = std::min<size_t>(4, corners.size());
+        Eigen::Vector3d mean(0.0, 0.0, 0.0);
+        for (size_t i = 0; i < take; ++i) {
+            mean += corners[i];
+        }
+        mean /= static_cast<double>(take);
+        Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+        for (size_t i = 0; i < take; ++i) {
+            Eigen::Vector3d v = corners[i] - mean;
+            cov += v * v.transpose();
+        }
+        if (take > 1) {
+            cov /= static_cast<double>(take - 1);
+        }
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(cov);
+        if (solver.info() != Eigen::Success) {
+            ROS_WARN("Failed to eigen-decompose bottom face covariance");
+            return false;
+        }
+        Eigen::Vector3d n = solver.eigenvectors().col(0);
+        if (n.norm() < 1e-12) {
+            ROS_WARN("Degenerate bottom normal from corners");
+            return false;
+        }
+        if (n.z() < 0.0) n = -n;
+        obb_base_normal_ = n.normalized();
+        ROS_INFO("Loaded OBB base normal from corners (%.6f, %.6f, %.6f)", obb_base_normal_.x(), obb_base_normal_.y(), obb_base_normal_.z());
+        return true;
+    }
+
     Bounds calculateBounds(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud) {
         Bounds bounds;
         if (cloud->points.empty()) return bounds;
@@ -326,29 +456,54 @@ private:
             empty_info.stop_reason = "no_points";
             return std::make_pair(0.0, empty_info);
         }
-        
-        // Calculate bounds
-        Bounds bounds = calculateBounds(cloud);
-        
-        // Calculate grid size
+
+        // 1) Base plane from OBB corners if available; otherwise PCA plane normal
+        Eigen::Vector3d n = have_obb_base_normal_ ? obb_base_normal_ : computePlaneNormalPCA(cloud);
+        const Eigen::Vector3d zAxis(0.0, 0.0, 1.0);
+        Eigen::Matrix3d R = rotationAlignAToB(n, zAxis); // R * n -> +Z
+
+        // 2) Rotate cloud and level by subtracting the minimum z (clamp to >= 0)
+        pcl::PointCloud<pcl::PointXYZ>::Ptr rot_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        rot_cloud->points.reserve(cloud->points.size());
+        double min_z = std::numeric_limits<double>::infinity();
+        for (const auto& p : cloud->points) {
+            Eigen::Vector3d v(p.x, p.y, p.z);
+            Eigen::Vector3d vr = R * v;
+            if (vr.z() < min_z) min_z = vr.z();
+            rot_cloud->points.emplace_back(static_cast<float>(vr.x()),
+                                           static_cast<float>(vr.y()),
+                                           static_cast<float>(vr.z()));
+        }
+        if (!std::isfinite(min_z)) min_z = 0.0;
+        for (auto& p : rot_cloud->points) {
+            double z = static_cast<double>(p.z) - min_z;
+            if (z < 0.0) z = 0.0;
+            p.z = static_cast<float>(z);
+        }
+        rot_cloud->width = cloud->width;
+        rot_cloud->height = cloud->height;
+        rot_cloud->is_dense = cloud->is_dense;
+
+        // 3) Calculate bounds on rotated cloud
+        Bounds bounds = calculateBounds(rot_cloud);
+        // 4) Grid size on rotated XY
         int num_x = std::max(1, static_cast<int>(
             std::ceil((bounds.max_x - bounds.min_x) / grid_resolution_x_)));
         int num_y = std::max(1, static_cast<int>(
             std::ceil((bounds.max_y - bounds.min_y) / grid_resolution_y_)));
-        
-        // Create height map
+        // 5) Create height map using rotated cloud and leveled z
         Eigen::MatrixXd height_map(num_x, num_y);
         Eigen::MatrixXi count_map(num_x, num_y);
         Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> empty_mask(num_x, num_y);
-        
-        createHeightMap(cloud, bounds, height_map, count_map, empty_mask);
+        createHeightMap(rot_cloud, bounds, height_map, count_map, empty_mask);
         
         InterpolationInfo interp_info;
         interp_info.stop_reason = "no_interpolation";
         
         // Perform interpolation
         if (interpolate_empty_cells_ && max_interpolation_passes_ > 0) {
-            Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> valid_mask = getConvexHullMask(cloud, bounds, num_x, num_y);
+            // Use rotated cloud for convex hull mask to match current grid frame
+            Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> valid_mask = getConvexHullMask(rot_cloud, bounds, num_x, num_y);
             std::pair<Eigen::MatrixXd, InterpolationInfo> interp_result = interpolateHeightMap(
                 height_map, empty_mask, valid_mask);
             height_map = interp_result.first;
