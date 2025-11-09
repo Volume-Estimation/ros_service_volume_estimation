@@ -1,0 +1,11 @@
+# 核心数值计算库
+numpy==1.24.4
+
+# 3D可视化库
+pyvista==0.44.2
+
+# PyVista Qt后端
+pyvistaqt==0.11.3
+
+# Qt GUI框架
+PySide6==6.2.4

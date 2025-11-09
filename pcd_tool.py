@@ -262,11 +262,12 @@ class App:
         self.box_widget = None
         self.box_last_transform = None
         self._actors = {}
+        self._text_min_z = None
         ########## DEM 配置 ##########
         self.grid_res_x = 0.1
         self.grid_res_y = 0.1
         self.height_method = 'mean'  # 'max' or 'mean'
-        self.interpolate_empty_cells = False
+        self.interpolate_empty_cells = True
         self.max_interpolation_passes = 100
 
         self._bind()
@@ -284,6 +285,7 @@ class App:
         self.pl.add_key_event("b", self.on_box)
         self.pl.add_key_event("o", self.on_export_obb)
         self.pl.add_key_event("t", self.on_export_transform)
+        self.pl.add_key_event("r", self.on_export_transform_reverse_z)
         self.pl.add_key_event("f", self.on_apply_transform_txt)
         self.pl.add_key_event("v", self.on_volume_dem)
         self.pl.add_key_event("space", self.on_level_and_apply)
@@ -300,8 +302,13 @@ class App:
         self.pl.add_key_event("Left", self.on_rotate_box_left)   # 方向键左: 绕Z轴逆时针旋转
         self.pl.add_key_event("Right", self.on_rotate_box_right) # 方向键右: 绕Z轴顺时针旋转
 
-        self.pl.add_text("L:Load  B:Box  O:Export OBB  T:Export Level Transform  F:Apply Transform  Space:Level+Apply  V:Volume(DEM)", font_size=10)
+        self.pl.add_text("L:Load  B:Box  O:Export OBB  T:Export Level Transform  R:Export Z-Flip Transform  F:Apply Transform  Space:Level+Apply  V:Volume(DEM)", font_size=10)
         self.pl.add_text("W/A/D/X:Move Box XY  Z:Box Z+  C:Box Z-  Left/Right:Rotate Z", font_size=10, position='upper_right')
+        # 刷新时更新“盒内最低点 z”文本
+        try:
+            self._update_box_min_z_text()
+        except Exception:
+            pass
 
     def on_load(self):
         dlg = QFileDialog(self.pl.app_window)
@@ -418,7 +425,7 @@ class App:
         except Exception:
             pass
         self.pl.render()
-        self.pl.add_text("L:Load  B:Box  O:Export OBB  T:Export Level Transform  F:Apply Transform  Space:Level+Apply  V:Volume(DEM)", font_size=10)
+        self.pl.add_text("L:Load  B:Box  O:Export OBB  T:Export Level Transform  R:Export Z-Flip Transform  F:Apply Transform  Space:Level+Apply  V:Volume(DEM)", font_size=10)
         self.pl.add_text("W/A/D/X:Move Box XY  Z:Box Z+  C:Box Z-  Left/Right:Rotate Z", font_size=10, position='upper_right')
 
     def on_level_and_apply(self):
@@ -654,6 +661,8 @@ class App:
                 transform = vtk.vtkTransform()
                 widget.GetTransform(transform)
                 self.box_last_transform = transform
+                # 交互时实时更新最低点 z 文本
+                self._update_box_min_z_text()
             except:
                 self.box_last_transform = None
 
@@ -685,6 +694,11 @@ class App:
             transform = vtk.vtkTransform()
             self.box_widget.GetTransform(transform)
             self.box_last_transform = transform
+        except Exception:
+            pass
+        # 创建盒子后尝试显示一次最低点 z
+        try:
+            self._update_box_min_z_text()
         except Exception:
             pass
 
@@ -913,6 +927,51 @@ class App:
         np.savetxt("T_level_yaw.txt", T2, fmt="%.9f")
         print("Transform -> T_level_yaw.txt (level+align X)")
 
+    def on_export_transform_reverse_z(self):
+        """导出并应用“空格变换”的 Z 轴翻转版本（不改原始文件，更新内存点云）。"""
+        if self.points is None or len(self.points) == 0:
+            print("请先加载点云 (L)")
+            return
+        P_sel = self._get_sel()
+        if P_sel is None:
+            return
+        try:
+            _, T2 = level_transforms(P_sel)
+            Fz = np.eye(4, dtype=np.float64)
+            Fz[2, 2] = -1.0  # 世界坐标 Z 翻转
+            T2_rev = Fz @ T2
+
+            # 应用到整幅点云（仅内存，不改源文件）
+            P_h = np.c_[self.points, np.ones(len(self.points))]
+            P_new = (T2_rev @ P_h.T).T[:, :3]
+            P_new = P_new[np.isfinite(P_new).all(axis=1)]
+            if P_new.size == 0:
+                raise ValueError("变换后点云为空或包含非有限数值")
+            self.points = P_new.astype(np.float64)
+
+            # 清理交互状态与叠加
+            self._remove_existing_box_widget()
+            if "_obb" in self._actors:
+                try:
+                    self.pl.remove_actor(self._actors["_obb"])
+                    del self._actors["_obb"]
+                except Exception:
+                    pass
+
+            # 保存矩阵到同名文件
+            try:
+                np.savetxt("T_level_yaw.txt", T2_rev, fmt="%.9f")
+                print("已保存: T_level_yaw.txt (Z 翻转版本)")
+            except Exception as _e:
+                print(f"保存 T_level_yaw.txt 失败: {_e}")
+
+            print("已计算并应用水平+偏航对齐的 Z 轴翻转变换 (R)")
+            np.set_printoptions(precision=6, suppress=True)
+            print("T_level_yaw (Z-Flip) =\n", T2_rev)
+            self._reset_scene()
+        except Exception as e:
+            print(f"计算/应用 Z 翻转变换失败: {e}")
+
     def _move_box_by_transform(self, dx: float, dy: float, dz: float):
         """通过变换移动盒子"""
         if self.box_widget is None or vtk is None:
@@ -931,10 +990,50 @@ class App:
 
             # 触发渲染
             self.pl.render()
+            # 更新最低点 z 文本
+            try:
+                self._update_box_min_z_text()
+            except Exception:
+                pass
             return True
         except Exception as e:
             print(f"移动盒子失败: {e}")
             return False
+
+    def _update_box_min_z_text(self):
+        """计算并在UI显示当前盒内最低点 z 值（世界坐标）。"""
+        try:
+            mask, P_sel = self._compute_selection_from_box()
+        except Exception:
+            mask, P_sel = None, None
+        if P_sel is not None and len(P_sel) > 0:
+            min_z = float(np.min(P_sel[:, 2]))
+            text = f"Box内最低点 z: {min_z:.6f}"
+        else:
+            text = "Box内最低点 z: N/A"
+        if self._text_min_z is None:
+            try:
+                self._text_min_z = self.pl.add_text(text, font_size=10, position='lower_left')
+            except Exception:
+                self._text_min_z = None
+                return
+        else:
+            updated = False
+            try:
+                if hasattr(self._text_min_z, "SetInput"):
+                    self._text_min_z.SetInput(text)
+                    updated = True
+            except Exception:
+                updated = False
+            if not updated:
+                try:
+                    self.pl.remove_actor(self._text_min_z)
+                except Exception:
+                    pass
+                try:
+                    self._text_min_z = self.pl.add_text(text, font_size=10, position='lower_left')
+                except Exception:
+                    self._text_min_z = None
 
     def on_move_box_left(self):
         """向左移动盒子 (X 负方向) - 按键 A"""
@@ -958,13 +1057,13 @@ class App:
 
     def on_move_box_z_up(self):
         """向上移动盒子 (Z 正方向) - 按键 Z"""
-        if self._move_box_by_transform(0.0, 0.0, 0.1):
-            print("盒子Z轴上移 0.1 单位 (Z)")
+        if self._move_box_by_transform(0.0, 0.0, 0.001):
+            print("盒子Z轴上移 0.001 单位 (Z)")
 
     def on_move_box_z_down(self):
         """向下移动盒子 (Z 负方向) - 按键 C"""
-        if self._move_box_by_transform(0.0, 0.0, -0.1):
-            print("盒子Z轴下移 0.1 单位 (C)")
+        if self._move_box_by_transform(0.0, 0.0, -0.001):
+            print("盒子Z轴下移 0.001 单位 (C)")
 
     def _rotate_box_by_transform(self, angle_degrees: float):
         """绕世界 Z 轴(即在 XY 平面)并以盒子中心为枢轴旋转 angle_degrees。"""
@@ -1027,6 +1126,11 @@ class App:
                     cy2 = (b2[2] + b2[3]) / 2.0
                     cz2 = (b2[4] + b2[5]) / 2.0
                     print(f"Box center after (world): {cx2:.6f}, {cy2:.6f}, {cz2:.6f}")
+            # 更新最低点 z 文本
+            try:
+                self._update_box_min_z_text()
+            except Exception:
+                pass
             return True
         except Exception as e:
             print(f"旋转盒子失败: {e}")

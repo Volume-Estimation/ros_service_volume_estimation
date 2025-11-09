@@ -19,7 +19,7 @@
   <param name="volume_estimator_node/grid_resolution_x" value="0.1"/>
   <param name="volume_estimator_node/grid_resolution_y" value="0.1"/>
   <param name="volume_estimator_node/height_method" value="mean"/>
-  <param name="volume_estimator_node/interpolate_empty_cells" value="false"/>
+  <param name="volume_estimator_node/interpolate_empty_cells" value="true"/>
   <param name="volume_estimator_node/max_interpolation_passes" value="1000"/>
   
   <!-- Service usage information -->
